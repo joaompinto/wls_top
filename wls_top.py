@@ -17,7 +17,7 @@ GREEN = '\033[32m'
 YELLOW = '\033[33m'
 BOLD = '\033[1m'
 NORMAL = '\033[0m'
-waitTime = 5000
+waitTime = 10000
 
 
 def expand(text, expand_len, pad='c', fillchar=' ', color=None, red_on=0):
@@ -48,20 +48,24 @@ def expand(text, expand_len, pad='c', fillchar=' ', color=None, red_on=0):
         text = color + text + NORMAL
     return text
 
+
 def build_header():
     header = BOLD + "|"
     header_fields = [
-        ('Server',  20, 'r'),
-        ('State',   11, 'c'),
-        ('Socks',   5,  'c'),
-        ('Throu',   5,  'c'),
-        ('Hogg',    4,  'c'),
-        ('Pendi',   5,  'c'),
-        ('Queue',   5,  'c'),
+        ('Server', 20, 'r'),
+        ('State', 11, 'c'),
+        ('Heap', 11, 'c'),
+        ('Socks', 5, 'c'),
+        ('Exec.', 5, 'c'),
+        ('Hogg', 4, 'c'),
+        ('Pend', 4, 'c'),
+        ('Queue', 5, 'c'),
     ]
     for field, fill_len, pos in header_fields:
-        header += expand(field, fill_len, pos)+"|"
+        header += expand(field, fill_len, pos) + "|"
     header += NORMAL
+    return header
+
 
 def print_subsystem_health(server):
     subsystemsHealth = server.getSubsystemHealthStates()
@@ -71,54 +75,63 @@ def print_subsystem_health(server):
         if state != 'HEALTH_OK':
             print BOLD + RED + comp, state, reason + NORMAL
 
+
 def build_serverinfo(server):
-            sName = server.getName()
-            runningServers.append(sName)
-            serverState = server.getState()
-            serverHealth = re.findall('State:(\w*)', str(server.getHealthState()))[0]
-            openSockets = hogging = pending = queue_len = ''
-            if serverState == 'RUNNING':
-                serverState = serverHealth
-                cd("/ServerRuntimes/" + sName)
-                openSockets = cmo.getOpenSocketsCurrentCount()
-                cd('ThreadPoolRuntime/ThreadPoolRuntime')
-                throughput = int(get('Throughput'))
-                hogging = get('HoggingThreadCount')
-                pending = get('PendingUserRequestCount')
-                queue_len = get('QueueLength')
-                cd("../..")
-                constraints = ls('MaxThreadsConstraintRuntimes', returnMap='true')
-                cd("MaxThreadsConstraintRuntimes")
-                constraintInfo = ''
-                for constraint in constraints:
-                    cd(constraint)
-                    name = get('Name').replace('MaxThreadsCount', '')
-                    deferred = str(get('DeferredRequests'))
-                    if deferred != "0":
-                        deferred = BOLD + RED + str(deferred) + NORMAL
-                    executing = get('ExecutingRequests')
-                    constraintInfo += '%s: %d/%s; ' % (name, executing, deferred)
-                    cd('..')
-                cd("..")
-            if serverState == 'HEALTH_OK':
-                serverState_color = GREEN
-            else:
-                serverState_color = BOLD + RED
-            info_fields = [
-                expand(sName, 20, 'r'),
-                expand(serverState, 11, 'c', color=serverState_color),
-                expand(openSockets, 5),
-                expand(throughput, 5),
-                expand(pending, 5, red_on=1),
-                expand(hogging, 4),
-                expand(queue_len, 5, red_on=1)
-            ]
-            info_line = '|'
-            for field in info_fields:
-                info_line += field + "|"
-            print info_line + constraintInfo
-            if serverState == 'RUNNING':
-                print_subsystem_health(server)
+    sName = server.getName()
+    runningServers.append(sName)
+    serverState = server.getState()
+    serverHealth = re.findall('State:(\w*)', str(server.getHealthState()))[0]
+    openSockets = ''
+    default_executing = executing = hogging = pending = queue_len = throughput = ''
+    heap_free = heap_size = ''
+    constraintInfo = ''
+    if serverState == 'RUNNING':
+        serverState = serverHealth
+        cd("/ServerRuntimes/" + sName)
+        openSockets = cmo.getOpenSocketsCurrentCount()
+        cd("JVMRuntime/" + sName)
+        heap_free = get('HeapFreeCurrent') / 1000000
+        heap_size = get('HeapSizeCurrent') / 1000000
+        cd("../..")
+        cd('ThreadPoolRuntime/ThreadPoolRuntime')
+        default_executing = get('ExecuteThreadTotalCount')
+        hogging = get('HoggingThreadCount')
+        pending = get('PendingUserRequestCount')
+        queue_len = get('QueueLength')
+        cd("../..")
+        constraints = ls('MaxThreadsConstraintRuntimes', returnMap='true')
+        cd("MaxThreadsConstraintRuntimes")
+        constraintInfo = ''
+        for constraint in constraints:
+            cd(constraint)
+            name = get('Name').replace('MaxThreadsCount', '')
+            deferred = str(get('DeferredRequests'))
+            if deferred != "0":
+                deferred = BOLD + RED + str(deferred) + NORMAL
+            executing = get('ExecutingRequests')
+            constraintInfo += '%s: %d/%s; ' % (name, executing, deferred)
+            cd('..')
+        cd("..")
+    if serverState == 'HEALTH_OK':
+        serverState_color = GREEN
+    else:
+        serverState_color = BOLD + RED
+    info_fields = [
+        expand(' ' + sName, 20, 'r'),
+        expand(serverState, 11, 'c', color=serverState_color),
+        expand("%s/%s " % (heap_free, heap_size), 11, 'l'),
+        expand(openSockets, 5),
+        expand(default_executing, 5),
+        expand(pending, 4, red_on=1),
+        expand(hogging, 4),
+        expand(queue_len, 5, red_on=1)
+    ]
+    info_line = '|'
+    for field in info_fields:
+        info_line += field + "|"
+    print info_line + constraintInfo
+    if serverState == 'RUNNING':
+        print_subsystem_health(server)
 
 
 redirect('/dev/null', 'false')
@@ -135,7 +148,7 @@ while 1:
         domainConfig = domainRuntimeService.getDomainConfiguration()
         domainRuntime()
 
-        print build_header
+        print build_header()
         runningServers = []
         servers = domainRuntimeService.getServerRuntimes()
         for server in servers:
